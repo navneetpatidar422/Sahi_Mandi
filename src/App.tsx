@@ -10,6 +10,7 @@ import { AdminLogin, AdminDashboard } from './pages/Admin';
 import { FarmerDashboard } from './pages/FarmerDashboard';
 import { AuthModal } from './components/auth/AuthModal';
 import { PlatformDocs } from './pages/PlatformDocs';
+import { MandiMap } from './pages/MandiMap';
 
 export default function App() {
   const [activePage, setActivePage] = useState('home');
@@ -82,6 +83,9 @@ export default function App() {
       
       case 'mandis':
         return <MandiDiscovery onMandiSelect={handleMandiSelect} initialSearch={searchQuery} />;
+      
+      case 'map':
+        return <MandiMap onMandiSelect={handleMandiSelect} />;
       
       case 'dashboard':
         return isLoggedIn ? (
