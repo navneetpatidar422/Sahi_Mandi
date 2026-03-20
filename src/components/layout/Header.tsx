@@ -25,7 +25,6 @@ export function Header({ onLoginClick, isLoggedIn, onNavigate, activePage, user 
   const navLinks = [
     { id: 'home', label: 'Home' },
     { id: 'mandis', label: 'Mandis' },
-    { id: 'map', label: 'Map' },
     { id: 'analyze', label: 'Smart Analyzer' },
     { id: 'admin', label: 'Mandi Admin' },
   ];
