@@ -79,6 +79,11 @@ export function MandiDiscovery({ onMandiSelect, initialSearch = '' }: MandiDisco
   const handleLocateMe = () => {
     setLocating(true);
     setLocationError(null);
+    if (!window.isSecureContext) {
+      setLocationError('Location needs a secure URL. Open this site on localhost or HTTPS, then try again.');
+      setLocating(false);
+      return;
+    }
     if (!navigator.geolocation) {
       setLocationError('Geolocation not supported.');
       setLocating(false);
@@ -93,11 +98,19 @@ export function MandiDiscovery({ onMandiSelect, initialSearch = '' }: MandiDisco
         setLocating(false);
         setViewMode('map');
       },
-      () => {
-        setLocationError('Could not get your location. Please allow location access.');
+      (err) => {
+        if (err.code === 1) {
+          setLocationError('Location permission blocked. Allow location in your browser settings and retry.');
+        } else if (err.code === 2) {
+          setLocationError('Location unavailable right now. Please check GPS/network and retry.');
+        } else if (err.code === 3) {
+          setLocationError('Location request timed out. Retry in an open area or with better network.');
+        } else {
+          setLocationError('Could not get your location. Please allow location access.');
+        }
         setLocating(false);
       },
-      { timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
