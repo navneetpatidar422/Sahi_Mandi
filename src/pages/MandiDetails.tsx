@@ -1,10 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
-import { ArrowLeft, Share2, MessageCircle, Star, Clock, Info, MapPin, ShieldCheck, Phone, Navigation, TrendingUp, ChevronRight, Calendar, ArrowUpRight, ArrowDownRight, Minus, X, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Share2, MessageCircle, Star, Clock, Info, MapPin, ShieldCheck, Phone, Navigation, TrendingUp, ChevronRight, Calendar, ArrowUpRight, ArrowDownRight, Minus, X, CheckCircle2, FileSpreadsheet, Download } from 'lucide-react';
 import { MANDIS, CURRENT_PRICES, CROPS, REVIEWS as INITIAL_REVIEWS } from '../lib/mockData';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Legend } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
+import { usePriceHistory, getMandiCropHistory, getMandiTodayPrices, getCropComparison } from '../lib/usePriceHistory';
 
 interface MandiDetailsProps {
   mandiId: string;
@@ -14,8 +15,9 @@ interface MandiDetailsProps {
 export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
   const mandi = MANDIS.find(m => m.id === mandiId);
   const prices = CURRENT_PRICES[mandiId as keyof typeof CURRENT_PRICES];
-  const [activeTab, setActiveTab] = useState<'prices' | 'info' | 'reviews'>('prices');
+  const [activeTab, setActiveTab] = useState<'prices' | 'weekly' | 'info' | 'reviews'>('prices');
   const [selectedCropId, setSelectedCropId] = useState<string | null>(null);
+  const { data: priceWorkbook, loading: isPriceWorkbookLoading } = usePriceHistory();
   
   // Review State
   const [reviews, setReviews] = useState(INITIAL_REVIEWS);
@@ -27,30 +29,63 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
     return CROPS.find(c => c.id === selectedCropId);
   }, [selectedCropId]);
 
-  // Generate mock history data for the selected crop
+  const mandiTodayPrices = useMemo(() => {
+    return getMandiTodayPrices(priceWorkbook, mandiId);
+  }, [priceWorkbook, mandiId]);
+
+  const mandiComparisonData = useMemo(() => {
+    return getCropComparison(priceWorkbook, mandiId)
+      .map((row) => ({
+        ...row,
+        shortCrop: row.cropName.split('(')[0].trim()
+      }))
+      .sort((a, b) => a.shortCrop.localeCompare(b.shortCrop));
+  }, [priceWorkbook, mandiId]);
+
+  // Use Excel history when available; fallback while workbook is still loading.
   const historyData = useMemo(() => {
     if (!selectedCrop || !prices) return [];
-    
-    const currentPrice = prices[selectedCrop.id as keyof typeof prices] || 2000;
+
+    const excelHistory = getMandiCropHistory(priceWorkbook, mandiId, selectedCrop.id);
+    if (excelHistory.length > 0) {
+      return excelHistory.map((row) => ({
+        day: row.day,
+        date: row.date,
+        price: row.price
+      }));
+    }
+
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    
-    // Create a realistic trend (e.g., slightly upward or downward)
-    // We use the crop ID to seed the randomness so it's consistent for the same crop
-    const seed = selectedCrop.id.charCodeAt(0) % 3; // 0, 1, or 2
-    const trendDirection = seed === 0 ? 1 : seed === 1 ? -1 : 0; 
-    
+    const currentPrice = prices[selectedCrop.id as keyof typeof prices] || 2000;
+    const seed = selectedCrop.id.charCodeAt(0) % 3;
+    const trendDirection = seed === 0 ? 1 : seed === 1 ? -1 : 0;
+
     return days.map((day, index) => {
-      // Add some random noise and a trend factor
       const variance = (Math.random() * 0.04) - 0.02; // +/- 2%
       const trendFactor = (index / 7) * 0.08 * trendDirection; // up to 8% change
-      
-      // Calculate price based on current price
       if (index === 6) return { day, price: currentPrice };
-      
+
       const price = Math.round(currentPrice * (1 - trendFactor + variance));
       return { day, price };
     });
-  }, [selectedCrop, prices]);
+  }, [selectedCrop, prices, priceWorkbook, mandiId]);
+
+  const weeklyRows = useMemo(() => {
+    if (!priceWorkbook) return [];
+    const byCrop = new Map<string, { cropName: string; rows: Array<{ date: string; day: string; price: number }>; todayPrice: number; weekAgoPrice: number; changePct: number }>();
+    for (const summary of mandiTodayPrices) {
+      byCrop.set(summary.cropId, {
+        cropName: summary.cropName,
+        rows: getMandiCropHistory(priceWorkbook, mandiId, summary.cropId),
+        todayPrice: summary.todayPrice,
+        weekAgoPrice: summary.weekAgoPrice,
+        changePct: summary.changePct
+      });
+    }
+    return Array.from(byCrop.entries())
+      .map(([cropId, value]) => ({ cropId, ...value, shortCrop: value.cropName.split('(')[0].trim() }))
+      .sort((a, b) => a.shortCrop.localeCompare(b.shortCrop));
+  }, [priceWorkbook, mandiTodayPrices, mandiId]);
 
   const insightData = useMemo(() => {
     if (historyData.length < 2) return { text: "Data unavailable", type: 'neutral' };
@@ -160,6 +195,7 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
         <div className="flex gap-8 overflow-x-auto hide-scrollbar">
           {[
             { id: 'prices', label: 'Daily Crop Prices' },
+            { id: 'weekly', label: '📊 Weekly History' },
             { id: 'info', label: 'Info & Schedule' },
             { id: 'reviews', label: 'Farmer Reviews' }
           ].map(tab => (
@@ -193,9 +229,13 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                   {CROPS.map((crop, index) => {
-                    const price = prices?.[crop.id as keyof typeof prices];
+                    const summary = mandiTodayPrices.find((row) => row.cropId === crop.id);
+                    const price = summary?.todayPrice ?? prices?.[crop.id as keyof typeof prices];
                     if (!price) return null;
-                    
+                    const changePct = summary?.changePct ?? 0;
+                    const isUp = changePct > 0;
+                    const isDown = changePct < 0;
+
                     return (
                       <motion.div 
                         initial={{ opacity: 0, y: 20 }}
@@ -214,12 +254,14 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
                           <p className="text-xs text-gray-500 mb-3">{crop.category}</p>
                           <div className="flex items-end justify-between">
                             <div>
-                               <span className="text-2xl font-bold text-green-700">₹{price}</span>
+                               <span className="text-2xl font-bold text-green-700">₹{price.toLocaleString()}</span>
                                <span className="text-xs text-gray-400 ml-1">/ quintal</span>
                             </div>
-                            <div className="flex items-center gap-1 bg-green-50 px-2 py-1 rounded text-green-700 text-xs font-bold">
-                              <TrendingUp className="w-3 h-3" />
-                              <span>+2.4%</span>
+                            <div className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold ${
+                              isUp ? 'bg-green-50 text-green-700' : isDown ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {isUp ? <ArrowUpRight className="w-3 h-3" /> : isDown ? <ArrowDownRight className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                              <span>{changePct > 0 ? '+' : ''}{changePct.toFixed(2)}%</span>
                             </div>
                           </div>
                         </div>
@@ -356,6 +398,97 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
               </motion.div>
             )}
           </div>
+        )}
+
+        {activeTab === 'weekly' && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="max-w-6xl mx-auto space-y-6"
+          >
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-green-100 text-green-700">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900">Weekly crop trend from Excel</p>
+                  <p className="text-sm text-gray-500">Today vs week ago and full 7-day mandi prices</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${
+                  !isPriceWorkbookLoading && priceWorkbook ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {!isPriceWorkbookLoading && priceWorkbook ? 'Excel data loaded' : 'Loading Excel data...'}
+                </span>
+                <a
+                  href="/mandi_price_history.xlsx"
+                  download
+                  className="inline-flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-black transition-colors"
+                >
+                  <Download className="w-4 h-4" /> Download Excel
+                </a>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Today vs Week Ago (All Crops)</h3>
+              <div className="h-[360px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={mandiComparisonData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                    <XAxis dataKey="shortCrop" tick={{ fill: '#6b7280', fontSize: 11 }} interval={0} angle={-25} textAnchor="end" height={70} />
+                    <YAxis tick={{ fill: '#6b7280', fontSize: 12 }} tickFormatter={(value) => `₹${value}`} />
+                    <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} />
+                    <Legend />
+                    <Bar dataKey="weekAgoPrice" fill="#93c5fd" name="Week Ago" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="todayPrice" fill="#16a34a" name="Today" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h3 className="text-lg font-bold text-gray-900">7-Day Price Table</h3>
+              </div>
+              <div className="overflow-x-auto max-h-[460px]">
+                <table className="w-full min-w-[980px] text-sm">
+                  <thead className="sticky top-0 bg-gray-50 z-10">
+                    <tr className="text-left text-gray-600">
+                      <th className="px-4 py-3 font-semibold">Crop</th>
+                      <th className="px-4 py-3 font-semibold">Today</th>
+                      <th className="px-4 py-3 font-semibold">Week Ago</th>
+                      <th className="px-4 py-3 font-semibold">% Change</th>
+                      <th className="px-4 py-3 font-semibold">Day 1</th>
+                      <th className="px-4 py-3 font-semibold">Day 2</th>
+                      <th className="px-4 py-3 font-semibold">Day 3</th>
+                      <th className="px-4 py-3 font-semibold">Day 4</th>
+                      <th className="px-4 py-3 font-semibold">Day 5</th>
+                      <th className="px-4 py-3 font-semibold">Day 6</th>
+                      <th className="px-4 py-3 font-semibold">Day 7</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {weeklyRows.map((row) => (
+                      <tr key={row.cropId} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-semibold text-gray-900">{row.shortCrop}</td>
+                        <td className="px-4 py-3 text-gray-800">₹{row.todayPrice.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-gray-800">₹{row.weekAgoPrice.toLocaleString()}</td>
+                        <td className={`px-4 py-3 font-bold ${row.changePct > 0 ? 'text-green-700' : row.changePct < 0 ? 'text-red-700' : 'text-gray-600'}`}>
+                          {row.changePct > 0 ? '+' : ''}{row.changePct.toFixed(2)}%
+                        </td>
+                        {row.rows.map((r) => (
+                          <td key={`${row.cropId}-${r.date}`} className="px-4 py-3 text-gray-700">₹{r.price.toLocaleString()}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </motion.div>
         )}
 
         {activeTab === 'info' && (
