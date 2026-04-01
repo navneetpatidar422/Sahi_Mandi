@@ -1,7 +1,8 @@
-
-import React, { useState } from 'react';
-import { User, Phone, MapPin, ArrowRight, Loader2, CheckCircle2, Sprout, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { User, Phone, MapPin, ArrowRight, Loader2, CheckCircle2, Sprout, AlertCircle, Navigation } from 'lucide-react';
 import { CROPS } from '../../lib/mockData';
+import { getCurrentLocation, geocodePincode } from '../../lib/locationUtils';
+import { INDIA_LOCATIONS, getAllStates, getDistrictsByState } from '../../lib/indiaLocations';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -12,13 +13,17 @@ interface AuthModalProps {
 export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
   const [step, setStep] = useState(1); // 1: Phone, 2: OTP, 3: Details, 4: Crops
   const [loading, setLoading] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [detectedLocation, setDetectedLocation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     phone: '',
     otp: '',
     name: '',
     location: '',
-    crops: [] as string[]
+    crops: [] as string[],
+    latitude: null as number | null,
+    longitude: null as number | null
   });
 
   // Detailed Location State
@@ -28,20 +33,170 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
     pincode: '',
     village: ''
   });
+  
+  const [locationPermissionStatus, setLocationPermissionStatus] = useState<'pending' | 'granted' | 'denied'>('pending');
 
-  const INDIAN_STATES = {
-    "Andhra Pradesh": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Nellore", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
-    "Bihar": ["Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar", "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur", "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran", "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"],
-    "Gujarat": ["Ahmedabad", "Amreli", "Anand", "Aravalli", "Banaskantha", "Bharuch", "Bhavnagar", "Botad", "Chhota Udaipur", "Dahod", "Dang", "Devbhoomi Dwarka", "Gandhinagar", "Gir Somnath", "Jamnagar", "Junagadh", "Kheda", "Kutch", "Mahisagar", "Mehsana", "Morbi", "Narmada", "Navsari", "Panchmahal", "Patan", "Porbandar", "Rajkot", "Sabarkantha", "Surat", "Surendranagar", "Tapi", "Vadodara", "Valsad"],
-    "Haryana": ["Ambala", "Bhiwani", "Charkhi Dadri", "Faridabad", "Fatehabad", "Gurugram", "Hisar", "Jhajjar", "Jind", "Kaithal", "Karnal", "Kurukshetra", "Mahendragarh", "Nuh", "Palwal", "Panchkula", "Panipat", "Rewari", "Rohtak", "Sirsa", "Sonipat", "Yamunanagar"],
-    "Madhya Pradesh": ["Agar Malwa", "Alirajpur", "Anuppur", "Ashoknagar", "Balaghat", "Barwani", "Betul", "Bhind", "Bhopal", "Burhanpur", "Chhatarpur", "Chhindwara", "Damoh", "Datia", "Dewas", "Dhar", "Dindori", "Guna", "Gwalior", "Harda", "Hoshangabad", "Indore", "Jabalpur", "Jhabua", "Katni", "Khandwa", "Khargone", "Mandla", "Mandsaur", "Morena", "Narsinghpur", "Neemuch", "Panna", "Raisen", "Rajgarh", "Ratlam", "Rewa", "Sagar", "Satna", "Sehore", "Seoni", "Shahdol", "Shajapur", "Sheopur", "Shivpuri", "Sidhi", "Singrauli", "Tikamgarh", "Ujjain", "Umaria", "Vidisha"],
-    "Maharashtra": ["Ahmednagar", "Akola", "Amravati", "Aurangabad", "Beed", "Bhandara", "Buldhana", "Chandrapur", "Dhule", "Gadchiroli", "Gondia", "Hingoli", "Jalgaon", "Jalna", "Kolhapur", "Latur", "Mumbai City", "Mumbai Suburban", "Nagpur", "Nanded", "Nandurbar", "Nashik", "Osmanabad", "Palghar", "Parbhani", "Pune", "Raigad", "Ratnagiri", "Sangli", "Satara", "Sindhudurg", "Solapur", "Thane", "Wardha", "Washim", "Yavatmal"],
-    "Punjab": ["Amritsar", "Barnala", "Bathinda", "Faridkot", "Fatehgarh Sahib", "Fazilka", "Ferozepur", "Gurdaspur", "Hoshiarpur", "Jalandhar", "Kapurthala", "Ludhiana", "Mansa", "Moga", "Muktsar", "Nawanshahr", "Pathankot", "Patiala", "Rupnagar", "Sahibzada Ajit Singh Nagar", "Sangrur", "Tarn Taran"],
-    "Rajasthan": ["Ajmer", "Alwar", "Banswara", "Baran", "Barmer", "Bharatpur", "Bhilwara", "Bikaner", "Bundi", "Chittorgarh", "Churu", "Dausa", "Dholpur", "Dungarpur", "Hanumangarh", "Jaipur", "Jaisalmer", "Jalore", "Jhalawar", "Jhunjhunu", "Jodhpur", "Karauli", "Kota", "Nagaur", "Pali", "Pratapgarh", "Rajsamand", "Sawai Madhopur", "Sikar", "Sirohi", "Sri Ganganagar", "Tonk", "Udaipur"],
-    "Uttar Pradesh": ["Agra", "Aligarh", "Ambedkar Nagar", "Amethi", "Amroha", "Auraiya", "Ayodhya", "Azamgarh", "Baghpat", "Bahraich", "Ballia", "Balrampur", "Banda", "Barabanki", "Bareilly", "Basti", "Bhadohi", "Bijnor", "Budaun", "Bulandshahr", "Chandauli", "Chitrakoot", "Deoria", "Etah", "Etawah", "Farrukhabad", "Fatehpur", "Firozabad", "Gautam Buddha Nagar", "Ghaziabad", "Ghazipur", "Gonda", "Gorakhpur", "Hamirpur", "Hapur", "Hardoi", "Hathras", "Jalaun", "Jaunpur", "Jhansi", "Kannauj", "Kanpur Dehat", "Kanpur Nagar", "Kasganj", "Kaushambi", "Kheri", "Kushinagar", "Lalitpur", "Lucknow", "Maharajganj", "Mahoba", "Mainpuri", "Mathura", "Mau", "Meerut", "Mirzapur", "Moradabad", "Muzaffarnagar", "Pilibhit", "Pratapgarh", "Prayagraj", "Raebareli", "Rampur", "Saharanpur", "Sambhal", "Sant Kabir Nagar", "Shahjahanpur", "Shamli", "Shravasti", "Siddharthnagar", "Sitapur", "Sonbhadra", "Sultanpur", "Unnao", "Varanasi"]
+  const handleNext = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    console.log('handleNext called, step:', step);
+    console.log('formData:', formData);
+    console.log('locationDetails:', locationDetails);
+    
+    if (!validateStep()) {
+      console.log('Validation failed');
+      return;
+    }
+
+    setLoading(true);
+    
+    // Simulate API delay
+    setTimeout(() => {
+      setLoading(false);
+      if (step < 4) {
+        setStep(step + 1);
+        setError(null); // Clear errors on step change
+      } else {
+        // Step 4 - Complete Registration
+        console.log('Completing registration...');
+        
+        // Construct final location string
+        const finalLocation = `${locationDetails.village}, ${locationDetails.district}, ${locationDetails.state} - ${locationDetails.pincode}`;
+        
+        const userData = {
+          ...formData,
+          location: finalLocation,
+          state: locationDetails.state,
+          district: locationDetails.district,
+          pincode: locationDetails.pincode,
+          village: locationDetails.village
+        };
+        
+        console.log('Calling onLoginSuccess with:', userData);
+        onLoginSuccess(userData);
+        
+        console.log('Closing modal...');
+        onClose();
+      }
+    }, 1000);
   };
 
-  if (!isOpen) return null;
+  const toggleCrop = (cropId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      crops: prev.crops.includes(cropId) 
+        ? prev.crops.filter(id => id !== cropId)
+        : [...prev.crops, cropId]
+    }));
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Allow only numbers and max 10 digits
+    const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+    setFormData({ ...formData, phone: value });
+    if (error) setError(null);
+  };
+
+  const handleOtpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Allow only numbers and max 4 digits
+    const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+    setFormData({ ...formData, otp: value });
+    if (error) setError(null);
+  };
+
+  const handleLocationClick = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const location = await getCurrentLocation();
+      if (location) {
+        // Only store GPS coordinates, user still needs to fill in address fields manually
+        setFormData(prev => ({
+          ...prev,
+          latitude: location.latitude,
+          longitude: location.longitude
+        }));
+      }
+    } catch (err: any) {
+      if (err.code === 1) {
+        setError("Location permission denied. Distances to mandis will be estimated.");
+      } else {
+        setError("Unable to get GPS location. Please enable location services.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestLocationPermission = async () => {
+    try {
+      const location = await getCurrentLocation();
+      if (location) {
+        setLocationPermissionStatus('granted');
+        setLocationDetails({
+          state: location.state,
+          district: location.district,
+          pincode: location.pincode,
+          village: location.village
+        });
+        setFormData(prev => ({
+          ...prev,
+          latitude: location.latitude,
+          longitude: location.longitude
+        }));
+      } else {
+        setLocationPermissionStatus('denied');
+      }
+    } catch (err) {
+      setLocationPermissionStatus('denied');
+      setError("Unable to fetch location. Please enter manually.");
+    }
+  };
+
+  const handlePincodeChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/\D/g, '').slice(0, 6);
+    setLocationDetails(prev => ({ ...prev, pincode: value }));
+    
+    // Clear detected location if pincode is incomplete
+    if (value.length < 6) {
+      setDetectedLocation(null);
+    }
+    
+    // Auto-geocode when pincode is complete
+    if (value.length === 6) {
+      setGeocoding(true);
+      setDetectedLocation(null);
+      try {
+        const result = await geocodePincode(value);
+        if (result) {
+          // Store GPS coordinates
+          setFormData(prev => ({
+            ...prev,
+            latitude: result.latitude,
+            longitude: result.longitude
+          }));
+          
+          // Auto-fill village/city if detected
+          const detectedCity = result.village || result.city;
+          if (detectedCity) {
+            setDetectedLocation(detectedCity);
+            setLocationDetails(prev => ({
+              ...prev,
+              village: detectedCity
+            }));
+          }
+          
+          // Clear any previous errors
+          setError(null);
+        }
+      } catch (err) {
+        // Silently fail - user can still use GPS button
+        console.error('Geocoding failed:', err);
+      } finally {
+        setGeocoding(false);
+      }
+    }
+  };
 
   const validateStep = () => {
     setError(null);
@@ -87,53 +242,18 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
       }
     }
 
+    // Step 4: Crops Validation
+    if (step === 4) {
+      if (formData.crops.length === 0) {
+        setError("Please select at least one crop.");
+        return false;
+      }
+    }
+
     return true;
   };
 
-  const handleNext = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateStep()) return;
-
-    setLoading(true);
-    
-    // Simulate API delay
-    setTimeout(() => {
-      setLoading(false);
-      if (step < 4) {
-        setStep(step + 1);
-        setError(null); // Clear errors on step change
-      } else {
-        // Construct final location string
-        const finalLocation = `${locationDetails.village}, ${locationDetails.district}, ${locationDetails.state} - ${locationDetails.pincode}`;
-        onLoginSuccess({ ...formData, location: finalLocation });
-        onClose();
-      }
-    }, 1000);
-  };
-
-  const toggleCrop = (cropId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      crops: prev.crops.includes(cropId) 
-        ? prev.crops.filter(id => id !== cropId)
-        : [...prev.crops, cropId]
-    }));
-  };
-
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow only numbers and max 10 digits
-    const value = e.target.value.replace(/\D/g, '').slice(0, 10);
-    setFormData({ ...formData, phone: value });
-    if (error) setError(null);
-  };
-
-  const handleOtpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow only numbers and max 4 digits
-    const value = e.target.value.replace(/\D/g, '').slice(0, 4);
-    setFormData({ ...formData, otp: value });
-    if (error) setError(null);
-  };
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -235,6 +355,44 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
             {/* Step 3: Profile Details */}
             {step === 3 && (
               <div className="space-y-4">
+                {/* GPS Location Capture Banner */}
+                <div className="bg-gradient-to-r from-green-50 to-blue-50 border-2 border-green-200 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="bg-green-600 p-2 rounded-lg shrink-0">
+                      <Navigation className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-bold text-gray-900 mb-1">Enable Location for Better Experience</h4>
+                      <p className="text-xs text-gray-600 mb-3">
+                        Share your GPS location to see accurate distances to mandis near you.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleLocationClick}
+                        disabled={loading}
+                        className="w-full bg-green-600 text-white px-4 py-2.5 rounded-lg font-bold hover:bg-green-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Getting Location...
+                          </>
+                        ) : formData.latitude && formData.longitude ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            Location Captured ✓
+                          </>
+                        ) : (
+                          <>
+                            <Navigation className="w-4 h-4" />
+                            Use My Current Location
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-700 uppercase ml-1">Full Name</label>
                   <div className="relative">
@@ -262,7 +420,7 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none transition-all appearance-none"
                     >
                       <option value="">Select State</option>
-                      {Object.keys(INDIAN_STATES).map(state => (
+                      {getAllStates().map(state => (
                         <option key={state} value={state}>{state}</option>
                       ))}
                     </select>
@@ -277,7 +435,7 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none transition-all appearance-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="">Select District</option>
-                      {locationDetails.state && (INDIAN_STATES as any)[locationDetails.state]?.map((dist: string) => (
+                      {locationDetails.state && getDistrictsByState(locationDetails.state)?.map((dist: string) => (
                         <option key={dist} value={dist}>{dist}</option>
                       ))}
                     </select>
@@ -289,11 +447,23 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
                       type="text" 
                       required 
                       value={locationDetails.pincode}
-                      onChange={e => setLocationDetails({...locationDetails, pincode: e.target.value.replace(/\D/g, '').slice(0, 6)})}
+                      onChange={handlePincodeChange}
                       className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none transition-all disabled:opacity-50"
                       placeholder="e.g. 422001"
                       maxLength={6}
                     />
+                    {geocoding && (
+                      <p className="text-xs text-blue-600 flex items-center gap-1 mt-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Fetching GPS coordinates...
+                      </p>
+                    )}
+                    {!geocoding && formData.latitude && formData.longitude && locationDetails.pincode.length === 6 && (
+                      <p className="text-xs text-green-600 flex items-center gap-1 mt-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        GPS coordinates obtained!
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -305,11 +475,26 @@ export function AuthModal({ isOpen, onClose, onLoginSuccess }: AuthModalProps) {
                       type="text" 
                       required 
                       value={locationDetails.village}
-                      onChange={e => setLocationDetails({...locationDetails, village: e.target.value})}
+                      onChange={e => {
+                        setLocationDetails({...locationDetails, village: e.target.value});
+                        // Clear detection flag when user manually edits
+                        if (detectedLocation) setDetectedLocation(null);
+                      }}
                       className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-500 focus:outline-none transition-all disabled:opacity-50"
                       placeholder="e.g. Rampur"
                     />
+                    {detectedLocation && locationDetails.village === detectedLocation && (
+                      <div className="absolute right-3 top-3.5">
+                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      </div>
+                    )}
                   </div>
+                  {detectedLocation && locationDetails.village === detectedLocation && (
+                    <p className="text-xs text-green-600 flex items-center gap-1 mt-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Auto-detected from pincode
+                    </p>
+                  )}
                 </div>
               </div>
             )}

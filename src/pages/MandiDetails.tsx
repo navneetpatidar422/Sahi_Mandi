@@ -1,17 +1,19 @@
-
 import React, { useState, useMemo } from 'react';
 import { ArrowLeft, Share2, MessageCircle, Star, Clock, Info, MapPin, ShieldCheck, Phone, Navigation, TrendingUp, ChevronRight, Calendar, ArrowUpRight, ArrowDownRight, Minus, X, CheckCircle2 } from 'lucide-react';
 import { MANDIS, CURRENT_PRICES, CROPS, REVIEWS as INITIAL_REVIEWS } from '../lib/mockData';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
+import { MapView } from '../components/MapView';
+import { calculateDistance, formatDistance } from '../lib/locationUtils';
 
 interface MandiDetailsProps {
   mandiId: string;
   onBack: () => void;
+  userLocation?: any;
 }
 
-export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
+export function MandiDetails({ mandiId, onBack, userLocation }: MandiDetailsProps) {
   const mandi = MANDIS.find(m => m.id === mandiId);
   const prices = CURRENT_PRICES[mandiId as keyof typeof CURRENT_PRICES];
   const [activeTab, setActiveTab] = useState<'prices' | 'info' | 'reviews'>('prices');
@@ -21,6 +23,19 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
   const [reviews, setReviews] = useState(INITIAL_REVIEWS);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [newReview, setNewReview] = useState({ rating: 0, comment: '', name: '' });
+
+  // Calculate real distance if user location is available
+  const distanceToMandi = useMemo(() => {
+    if (!mandi || !userLocation?.latitude || !userLocation?.longitude) {
+      return null;
+    }
+    return calculateDistance(
+      userLocation.latitude,
+      userLocation.longitude,
+      mandi.latitude,
+      mandi.longitude
+    );
+  }, [mandi, userLocation]);
 
   const selectedCrop = useMemo(() => {
     if (!selectedCropId) return null;
@@ -365,6 +380,27 @@ export function MandiDetails({ mandiId, onBack }: MandiDetailsProps) {
             className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8"
           >
             <div className="md:col-span-2 space-y-6">
+              {/* Map View */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-4 text-xl flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-green-600" />
+                  Mandi Location
+                </h3>
+                <MapView
+                  mandis={[mandi]}
+                  center={[mandi.latitude, mandi.longitude]}
+                  zoom={13}
+                  height="350px"
+                />
+                <div className="mt-4 flex items-start gap-3 p-4 bg-gray-50 rounded-lg">
+                  <Navigation className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold text-gray-900">{mandi.location}</p>
+                    <p className="text-sm text-gray-600 mt-1">{distanceToMandi ? formatDistance(distanceToMandi) : mandi.distance} from your location</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-gray-900 mb-4 text-xl">About {mandi.name}</h3>
                 <p className="text-gray-600 leading-relaxed">
